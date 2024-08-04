@@ -99,7 +99,7 @@ def release(version):
 
         # Check for PyPI credentials
         pypi_username = "__token__"
-        pypi_api_key = blitz_env_manager.get_env_var_value_from_global_env_file('PYPI_API_KEY')
+        pypi_api_key = blitz_env_manager.get_global_var('PYPI_API_KEY')
         if not pypi_api_key:
             click.echo("PYPI_API_KEY is not set in the global .blitz.env file. Please set it and try again.")
             return
@@ -121,7 +121,82 @@ def release(version):
         click.echo(f"An error occurred during the release process: {str(e)}")
     except Exception as e:
         click.echo(f"An unexpected error occurred: {str(e)}")
+# blitz create-project <project_type='cli' | 'lib'> <project_name> <project_description>
+from cookiecutter.main import cookiecutter
+import os
 
+# find the difference between two file paths to try to navigate from the first path to the second
+def find_path_difference(path1, path2):
+    path1 = path1.split(os.path.sep)
+    path2 = path2.split(os.path.sep)
+
+    # find the common prefix
+    i = 0
+    while i < len(path1) and i < len(path2) and path1[i] == path2[i]:
+        i += 1
+
+    # find the relative path from path1 to the common prefix
+    rel_path = ['..'] * (len(path1) - i)
+
+    # find the relative path from the common prefix to path2
+    rel_path += path2[i:]
+
+    return os.path.sep.join(rel_path)
+
+@main.command('create-project')
+@click.option('--type', type=click.Choice(['cli', 'lib']), prompt='Project type', help='The type of project (cli or lib)')
+@click.option('--name', prompt='Project name', help='The name of the project')
+@click.option('--description', prompt='Project description', help='A brief description of the project')
+def create_project(type, name, description):
+    """Create a new project within the current workspace."""
+    try:
+        # First, try to get the workspace name from the environment
+        blitz_env_manager = BlitzEnvManager()
+        workspace_name = blitz_env_manager.get_global_var('CURRENT_WORKSPACE')
+
+        if not workspace_name:
+            click.echo("No current workspace found. Please create or select a workspace first.")
+            return
+
+        # Now initialize BlitzEnvManager with the workspace name
+        blitz_env_manager = BlitzEnvManager(workspace_name)
+
+        if not blitz_env_manager.workspace_env_file_exists():
+            click.echo(f"Workspace environment file not found for '{workspace_name}'. Please ensure the workspace exists.")
+            return
+
+        # Get the workspace directory
+        workspace_dir = blitz_env_manager.get_workspace_env_var('WORKSPACE_DIRECTORY')
+        if not workspace_dir:
+            click.echo("Workspace directory not found. Please ensure the workspace is set up correctly.")
+            return
+
+        # Path to your custom Cookiecutter template
+        template_path = os.path.join(os.path.dirname(__file__), '..', 'templates', f'poetry-{type}-template')
+
+        if not os.path.exists(template_path):
+            click.echo(f"Template for {type} projects not found. Please ensure the template exists.")
+            return
+
+        # Use Cookiecutter to create the project
+        cookiecutter(
+            template_path,
+            no_input=True,
+            extra_context={
+                'project_name': name,
+                'project_slug': name.lower().replace(' ', '_'),
+                'project_description': description,
+                'author_name': blitz_env_manager.get_global_var('AUTHOR_NAME') or 'Your Name',
+                'author_email': blitz_env_manager.get_global_var('AUTHOR_EMAIL') or 'your.email@example.com',
+            },
+            output_dir=workspace_dir
+        )
+
+        click.echo(f"Successfully created {type} project '{name}' in workspace '{workspace_name}'")
+        click.echo(f"Project path: {os.path.join(workspace_dir, name.lower().replace(' ', '_'))}")
+
+    except Exception as e:
+        click.echo(f"An error occurred while creating the project: {str(e)}")
 if __name__ == "__main__":
     click.echo("Starting the application...")
     main()
